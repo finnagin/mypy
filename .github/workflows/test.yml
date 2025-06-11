@@ -42,6 +42,11 @@ jobs:
           os: windows-latest
           toxenv: py39
           tox_extra_args: "-n 4"
+        - name: Test suite with py311-windows-arm64
+          python: '3.11'
+          os: windows-11-arm
+          toxenv: py311
+          tox_extra_args: "-n 4"
         - name: Test suite with py310-ubuntu
           python: '3.10'
           os: ubuntu-24.04-arm
@@ -96,6 +101,10 @@ jobs:
         - name: Type check our own code (py39-windows-64)
           python: '3.9'
           os: windows-latest
+          toxenv: type
+        - name: Type check our own code (py311-windows-arm64)
+          python: '3.11'
+          os: windows-11-arm
           toxenv: type
 
           # We also run these checks with pre-commit in CI,
