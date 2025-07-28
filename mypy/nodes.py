@@ -508,6 +508,8 @@ class FuncBase(Node):
         self.info = FUNC_NO_INFO
         self.is_property = False
         self.is_class = False
+        # Is this a `@staticmethod` (explicit or implicit)?
+        # Note: use has_self_or_cls_argument to check if there is `self` or `cls` argument
         self.is_static = False
         self.is_final = False
         self.is_explicit_override = False
@@ -523,6 +525,15 @@ class FuncBase(Node):
     @property
     def fullname(self) -> str:
         return self._fullname
+
+    @property
+    def has_self_or_cls_argument(self) -> bool:
+        """If used as a method, does it have an argument for method binding (`self`, `cls`)?
+
+        This is true for `__new__` even though `__new__` does not undergo method binding,
+        because we still usually assume that `cls` corresponds to the enclosing class.
+        """
+        return not self.is_static or self.name == "__new__"
 
 
 OverloadPart: _TypeAlias = Union["FuncDef", "Decorator"]
@@ -3011,6 +3022,7 @@ class TypeInfo(SymbolNode):
         "dataclass_transform_spec",
         "is_type_check_only",
         "deprecated",
+        "type_object_type",
     )
 
     _fullname: str  # Fully qualified name
@@ -3167,6 +3179,10 @@ class TypeInfo(SymbolNode):
     # The type's deprecation message (in case it is deprecated)
     deprecated: str | None
 
+    # Cached value of class constructor type, i.e. the type of class object when it
+    # appears in runtime context.
+    type_object_type: mypy.types.FunctionLike | None
+
     FLAGS: Final = [
         "is_abstract",
         "is_enum",
@@ -3225,6 +3241,7 @@ class TypeInfo(SymbolNode):
         self.dataclass_transform_spec = None
         self.is_type_check_only = False
         self.deprecated = None
+        self.type_object_type = None
 
     def add_type_vars(self) -> None:
         self.has_type_var_tuple_type = False
@@ -3371,14 +3388,61 @@ class TypeInfo(SymbolNode):
             return declared
         if self._fullname == "builtins.type":
             return mypy.types.Instance(self, [])
-        candidates = [
-            s.declared_metaclass
-            for s in self.mro
-            if s.declared_metaclass is not None and s.declared_metaclass.type is not None
-        ]
-        for c in candidates:
-            if all(other.type in c.type.mro for other in candidates):
-                return c
+
+        winner = declared
+        for super_class in self.mro[1:]:
+            super_meta = super_class.declared_metaclass
+            if super_meta is None or super_meta.type is None:
+                continue
+            if winner is None:
+                winner = super_meta
+                continue
+            if winner.type.has_base(super_meta.type.fullname):
+                continue
+            if super_meta.type.has_base(winner.type.fullname):
+                winner = super_meta
+                continue
+            # metaclass conflict
+            winner = None
+            break
+
+        return winner
+
+    def explain_metaclass_conflict(self) -> str | None:
+        # Compare to logic in calculate_metaclass_type
+        declared = self.declared_metaclass
+        if declared is not None and not declared.type.has_base("builtins.type"):
+            return None
+        if self._fullname == "builtins.type":
+            return None
+
+        winner = declared
+        if declared is None:
+            resolution_steps = []
+        else:
+            resolution_steps = [f'"{declared.type.fullname}" (metaclass of "{self.fullname}")']
+        for super_class in self.mro[1:]:
+            super_meta = super_class.declared_metaclass
+            if super_meta is None or super_meta.type is None:
+                continue
+            if winner is None:
+                winner = super_meta
+                resolution_steps.append(
+                    f'"{winner.type.fullname}" (metaclass of "{super_class.fullname}")'
+                )
+                continue
+            if winner.type.has_base(super_meta.type.fullname):
+                continue
+            if super_meta.type.has_base(winner.type.fullname):
+                winner = super_meta
+                resolution_steps.append(
+                    f'"{winner.type.fullname}" (metaclass of "{super_class.fullname}")'
+                )
+                continue
+            # metaclass conflict
+            conflict = f'"{super_meta.type.fullname}" (metaclass of "{super_class.fullname}")'
+            return f"{' > '.join(resolution_steps)} conflicts with {conflict}"
+
         return None
 
     def is_metaclass(self, *, precise: bool = False) -> bool:
