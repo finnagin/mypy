@@ -3,7 +3,7 @@ name: Tests
 on:
   workflow_dispatch:
   push:
-    branches: [main, master, 'release*']
+    branches: [main, master, 'release*', 'win-arm64']
     tags: ['*']
   pull_request:
     paths-ignore:
@@ -70,6 +70,11 @@ jobs:
           os: windows-latest
           toxenv: py
           tox_extra_args: "-n 4"
+        - name: Test suite with py314-windows-arm64
+          python: '3.14'
+          os: windows-11-arm
+          toxenv: py
+          tox_extra_args: "-n 4"
 
         # - name: Test suite with py315-dev-ubuntu
         #   python: '3.15-dev'
@@ -120,6 +125,10 @@ jobs:
         - name: Type check our own code (py310-windows-64)
           python: '3.10'
           os: windows-latest
+          toxenv: type
+        - name: Type check our own code (py311-windows-arm64)
+          python: '3.11'
+          os: windows-11-arm
           toxenv: type
 
           # We also run these checks with pre-commit in CI,
